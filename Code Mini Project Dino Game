@@ -1,0 +1,275 @@
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
+
+#define BUTTON_JUMP 2
+#define BUTTON_DUCK 3
+#define BUZZER_PIN 11
+#define OLED_RESET -1
+
+Adafruit_SH1106G display = Adafruit_SH1106G(128, 64, &Wire, OLED_RESET);
+
+// Variabel game yang dimodifikasi
+int dinoY = 54;
+int dinoX = 20;
+bool isJumping = false;
+bool isDucking = false;
+int jumpVelocity = 0;
+const int GRAVITY = 2;
+int JUMP_FORCE = 10;
+const int GROUND_Y = 54; 
+int gameSpeed = 3;
+int score = 0;
+bool gameOver = false;
+unsigned long lastInteractionTime = 0;
+bool screenSaverMode = false;
+
+// Sprite dinosaurus (16x16 pixel)
+const unsigned char dinoBitmap[] PROGMEM = {
+  B00000011, B11000000,
+  B00000111, B11100000,
+  B00000111, B11100000,
+  B00000111, B11100000,
+  B00000111, B11100000,
+  B00000111, B11100000,
+  B11000111, B11100000,
+  B11100111, B11100000,
+  B11110111, B11100000,
+  B11111111, B11100000,
+  B01111111, B11100000,
+  B00111111, B11000000,
+  B00011111, B10000000,
+  B00001101, B10000000,
+  B00001001, B00000000,
+  B00000101, B00000000
+};
+
+const unsigned char dinoDuckBitmap[] PROGMEM = {
+  B00000111, B11100000,
+  B00001111, B11110000,
+  B11111111, B11111000,
+  B11111111, B11111000,
+  B01111111, B11110000,
+  B00111111, B11100000,
+  B00001101, B10000000,
+  B00000101, B00000000
+};
+
+struct Obstacle {
+  int x;
+  int y;
+  bool isDuck;
+  int width;
+  int height;
+};
+
+Obstacle obstacles[2];
+
+float speedMultiplier = 1.0;
+int minGapBetweenObstacles = 80;
+
+void setup() {
+  pinMode(BUTTON_JUMP, INPUT_PULLUP);
+  pinMode(BUTTON_DUCK, INPUT_PULLUP);
+  pinMode(BUZZER_PIN, OUTPUT);
+  
+  display.begin(0x3C, true);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE);
+  display.display();
+  
+  resetObstacles();
+}
+
+void loop() {
+  if (!screenSaverMode) {
+    if (!gameOver) {
+      handleGameplay();
+    } else {
+      showGameOver();
+      if (digitalRead(BUTTON_JUMP) == LOW) {
+        resetGame();
+      }
+    }
+    
+    if (millis() - lastInteractionTime > 10000) {
+      screenSaverMode = true;
+      display.clearDisplay();
+    }
+  } else {
+    showScreenSaver();
+    if (digitalRead(BUTTON_JUMP) == LOW || digitalRead(BUTTON_DUCK) == LOW) {
+      screenSaverMode = false;
+      lastInteractionTime = millis();
+    }
+  }
+}
+
+void handleGameplay() {
+  JUMP_FORCE = -10 - (gameSpeed - 3);
+  
+  if (digitalRead(BUTTON_JUMP) == LOW && !isJumping && dinoY >= GROUND_Y) {
+    isJumping = true;
+    jumpVelocity = JUMP_FORCE;
+    tone(BUZZER_PIN, 1000, 50);
+    lastInteractionTime = millis();
+  }
+  
+  if (isJumping) {
+    dinoY += jumpVelocity;
+    jumpVelocity += GRAVITY;
+    
+    if (jumpVelocity > abs(JUMP_FORCE)) {
+      jumpVelocity = abs(JUMP_FORCE);
+    }
+    
+    if (dinoY >= GROUND_Y) {
+      dinoY = GROUND_Y;
+      isJumping = false;
+      jumpVelocity = 0;
+    }
+  }
+  
+  if (digitalRead(BUTTON_DUCK) == LOW && !isJumping) {
+    if (!isDucking) {
+      tone(BUZZER_PIN, 500, 50);
+    }
+    isDucking = true;
+    lastInteractionTime = millis();
+  } else {
+    isDucking = false;
+  }
+  
+  for (int i = 0; i < 2; i++) {
+    obstacles[i].x -= gameSpeed;
+    
+    if (obstacles[i].x < -20) {
+      int otherObsX = (i == 0) ? obstacles[1].x : obstacles[0].x;
+      int minSpawnX = max(128, otherObsX + minGapBetweenObstacles + (gameSpeed * 5));
+      int maxSpawnX = minSpawnX + 50;
+      obstacles[i].x = random(minSpawnX, maxSpawnX);
+      
+      obstacles[i].isDuck = random(2) == 1;
+      
+      if (obstacles[i].isDuck) {
+        obstacles[i].width = 16;
+        obstacles[i].height = 25;
+        obstacles[i].y = 18;
+      } else {
+        obstacles[i].width = 12;
+        obstacles[i].height = 20;
+        obstacles[i].y = GROUND_Y - obstacles[i].height; 
+      }
+      
+      score++;
+      if (score % 10 == 0 && gameSpeed < 7) {
+        gameSpeed++;
+        minGapBetweenObstacles = max(60, minGapBetweenObstacles - 5);
+      }
+    }
+    
+    if (checkCollision(obstacles[i])) {
+      gameOver = true;
+      tone(BUZZER_PIN, 200, 500);
+    }
+  }
+  
+  display.clearDisplay();
+  
+
+  if (isDucking) {
+    display.drawBitmap(dinoX, dinoY - 8, dinoDuckBitmap, 16, 8, SH110X_WHITE);
+  } else {
+    display.drawBitmap(dinoX, dinoY - 16, dinoBitmap, 16, 16, SH110X_WHITE);
+  }
+  
+
+  for (int i = 0; i < 2; i++) {
+    display.fillRect(obstacles[i].x, obstacles[i].y,
+                    obstacles[i].width, obstacles[i].height, SH110X_WHITE);
+  }
+  
+  
+  display.drawFastHLine(0, GROUND_Y + 1, 128, SH110X_WHITE);  
+  
+  display.setCursor(70, 0);
+  display.print("Score: ");
+  display.print(score);
+  
+  display.display();
+  delay(16);
+}
+
+void showGameOver() {
+  display.clearDisplay();
+  display.setCursor(32, 10);
+  display.print("GAME OVER!");
+  display.setCursor(35, 25);
+  display.print("Score: ");
+  display.print(score);
+  display.setCursor(10, 40);
+  display.print("Press JUMP to reset");
+  display.display();
+}
+
+void showScreenSaver() {
+  static int ballX = 64;
+  static int ballY = 32;
+  static int dirX = 1;
+  static int dirY = 1;
+  
+  display.clearDisplay();
+  display.fillCircle(ballX, ballY, 3, SH110X_WHITE);
+  display.display();
+  
+  ballX += dirX;
+  ballY += dirY;
+  
+  if (ballX >= 127 || ballX <= 0) dirX = -dirX;
+  if (ballY >= 63 || ballY <= 0) dirY = -dirY;
+  
+  delay(20);
+}
+
+bool checkCollision(Obstacle obs) {
+  int dinoWidth = 12;
+  int dinoHeight = isDucking ? 8 : 16;
+  int dinoHitboxY = isDucking ? dinoY - 8 : dinoY - 16;  
+  
+  int collisionMargin = 2;
+  
+  bool xOverlap = (dinoX + collisionMargin) < (obs.x + obs.width - collisionMargin) && 
+                 (dinoX + dinoWidth - collisionMargin) > (obs.x + collisionMargin);
+                 
+  bool yOverlap = (dinoHitboxY + collisionMargin) < (obs.y + obs.height - collisionMargin) && 
+                 (dinoHitboxY + dinoHeight - collisionMargin) > (obs.y + collisionMargin);
+  
+  return xOverlap && yOverlap;
+}
+
+void resetObstacles() {
+  obstacles[0].x = 128;
+  obstacles[0].isDuck = false;
+  obstacles[0].width = 12;
+  obstacles[0].height = 24;
+  obstacles[0].y = GROUND_Y - 24;  // Posisi obstacle disesuaikan dengan ground
+  
+  obstacles[1].x = 200;
+  obstacles[1].isDuck = true;
+  obstacles[1].width = 16;
+  obstacles[1].height = 16;
+  obstacles[1].y = 10;
+}
+
+void resetGame() {
+  gameOver = false;
+  score = 0;
+  dinoY = GROUND_Y;
+  isJumping = false;
+  isDucking = false;
+  gameSpeed = 3;
+  minGapBetweenObstacles = 80;
+  resetObstacles();
+}
