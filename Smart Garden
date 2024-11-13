@@ -1,0 +1,70 @@
+#include <Servo.h>
+#include <LiquidCrystal_I2C.h>
+
+int p = A2;
+int TEMP = 0;
+
+Servo ser;
+
+LiquidCrystal_I2C lcd(0x20, 16, 2);
+
+void setup() {
+  Serial.begin(9600);
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Smart Garden");
+  lcd.setCursor(0, 1);
+  lcd.print("Monitoring");
+  delay(1000);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Kelompok 8");
+  delay(1000);
+  lcd.clear();
+  pinMode(p, INPUT);
+  pinMode(A1, INPUT);
+  ser.attach(5);
+}
+
+void loop() {
+  int value = analogRead(A1);
+  Serial.println(value);
+  
+ if (value < 200) {
+    lcd.setCursor(0, 0);
+    lcd.print("Air  : KURANG");
+     
+    // Menyalakan micro servo
+    ser.write(90);
+  } else if (value > 200 && value < 750) {
+    lcd.setCursor(0, 0);
+    lcd.print("Air  : CUKUP ");
+  
+    // Mematikan micro servo
+    ser.write(45);
+  } else if (value > 750) {
+    lcd.setCursor(0, 0);
+    lcd.print("Air  : LEBIH ");
+
+    // Mematikan micro servo
+    ser.write(0);
+  }
+
+  delay(2000);
+
+  int sv = analogRead(p);
+  Serial.println(sv);
+
+  TEMP = (-40 + 0.488155 * (analogRead(A0) - 20));
+
+  Serial.println("t: ");
+  Serial.println(TEMP);
+  lcd.setCursor(0, 1);
+  lcd.print("Suhu : ");
+  lcd.setCursor(7, 1);
+  lcd.print(TEMP);
+  lcd.setCursor(9, 1);
+  lcd.print("'C");
+}
